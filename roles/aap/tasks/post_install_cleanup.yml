@@ -1,0 +1,6 @@
+---
+- name: Remove SSH key
+  ansible.builtin.file:
+    path: "{{ aap_installer_ssh_key_dest }}"
+    state: absent
+  when: aap_remove_ssh_key_from_install_server

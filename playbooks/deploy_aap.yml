@@ -1,0 +1,115 @@
+---
+- name: Deploy AWS infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Deploy Infrastructure
+      ansible.builtin.include_role:
+        name: lab.aws_deployment.infrastructure
+      tags:
+        - always
+
+    - name: Wait 10 mins for all VMs to become available
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: 22
+        timeout: 600
+      loop: "{{ groups.public }}"
+      tags:
+        - controller
+        - hub
+        - eda
+
+- name: Ensure VMs are up-to-date
+  hosts: public
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Configure RHEL subscription manager
+      ansible.builtin.include_role:
+        name: lab.aws_deployment.infrastructure
+        tasks_from: vms/subscription_manager
+      tags:
+        - controller
+        - hub
+        - eda
+
+    - name: Manage RHEL packages
+      ansible.builtin.include_role:
+        name: lab.aws_deployment.infrastructure
+        tasks_from: vms/dnf
+      tags:
+        - controller
+        - hub
+        - eda
+
+- name: Install AAP
+  hosts: installer
+  gather_facts: false
+  become: false
+  vars:
+    aap_controller_hosts: "{{ groups.controller_private }}"
+    aap_ee_hosts: "{{ groups.execution_private | default('') }}"
+    aap_hub_hosts: "{{ groups.hub_private | default('') }}"
+    aap_eda_hosts: "{{ groups.eda_private | default('') }}"
+    aap_eda_allowed_hostnames: "{{ (groups.eda_public | default([])) | join(',') }}"
+    aap_db_host: "{{ hostvars.localhost.infrastructure_db.endpoint.address }}"
+  tasks:
+    - name: Run AAP role
+      ansible.builtin.include_role:
+        name: lab.aws_deployment.aap
+      tags:
+        - controller
+        - hub
+        - eda
+
+- name: Wrap up deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Access Ansible Automation Controller (Load Balancer)
+      ansible.builtin.debug:
+        msg: "https://{{ infrastructure_lb.dns_name }}"
+      when:
+        - infrastructure_lb is defined
+        - infrastructure_lb.dns_name is defined
+      tags:
+        - controller
+        - hub
+        - eda
+
+    - name: Access Ansible Automation Controller (VM)
+      ansible.builtin.debug:
+        msg: "https://{{ groups.controller_public[0] }}"
+      when:
+        - infrastructure_lb is not defined
+      tags:
+        - controller
+        - hub
+        - eda
+
+    - name: Access Ansible Private Automation Hub (VM)
+      ansible.builtin.debug:
+        msg: "https://{{ groups.hub_public[0] }}"
+      when:
+        - groups.hub_public is defined
+        - groups.hub_public | length > 0
+      tags:
+        - controller
+        - hub
+        - eda
+
+    - name: Access Ansible Event Driven Automation (VM)
+      ansible.builtin.debug:
+        msg: "https://{{ groups.eda_public[0] }}"
+      when:
+        - groups.eda_public is defined
+        - groups.eda_public | length > 0
+      tags:
+        - controller
+        - hub
+        - eda
